@@ -4,15 +4,18 @@
 #include <atomic>
 #include <mutex>
 
+const int REPEAT_START_DELAY = 200;
+const int REPEAT_INTERVAL = 20;
+
 // Flags to control the keypress threads
 std::atomic<bool> sendLeft(false);
 std::atomic<bool> sendRight(false);
 
-std::chrono::steady_clock::time_point buttonPressTime1;
-std::atomic<bool> firstPress1(true);
+std::chrono::steady_clock::time_point buttonPressTimeLeft;
+std::atomic<bool> firstPressRight(true);
 
-std::chrono::steady_clock::time_point buttonPressTime2;
-std::atomic<bool> firstPress2(true);
+std::chrono::steady_clock::time_point buttonPressTimeRight;
+std::atomic<bool> firstPressLeft(true);
 
 std::condition_variable cvRight;
 std::mutex cv_m_Right;
@@ -23,31 +26,31 @@ std::mutex cv_m_Left;
 // Thread function for sending left arrow keypresses
 void sendLeftThreadFunc()
 {
+    std::unique_lock<std::mutex> lk(cv_m_Left);
     while (true)
-    {
-        std::unique_lock<std::mutex> lk(cv_m_Left);
-        while (true)
-        {
-            if (sendLeft)
-            {
-                if (firstPress1) {
-                    keybd_event(VK_LEFT, 0, 0, 0);
-                    keybd_event(VK_LEFT, 0, KEYEVENTF_KEYUP, 0);
-                    firstPress1 = false;
-                    Sleep(500);
-                }
-                else if (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - buttonPressTime1).count() >= 100) {
-                    keybd_event(VK_LEFT, 0, 0, 0);
-                    keybd_event(VK_LEFT, 0, KEYEVENTF_KEYUP, 0);
-                    Sleep(10);
-                }
-            }
-            else
-            {
-                cvLeft.wait(lk);
-            }
-        }
-    }
+	{
+		if(sendLeft)
+		{
+			if (firstPressLeft) {
+				keybd_event(VK_LEFT, 0, 0, 0);
+				keybd_event(VK_LEFT, 0, KEYEVENTF_KEYUP, 0);
+				firstPressLeft = false;
+				buttonPressTimeLeft = std::chrono::steady_clock::now();
+			}
+			else if (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - buttonPressTimeLeft).count() >= REPEAT_START_DELAY) {
+				keybd_event(VK_LEFT, 0, 0, 0);
+				keybd_event(VK_LEFT, 0, KEYEVENTF_KEYUP, 0);
+                cvLeft.wait_for(lk, std::chrono::milliseconds(REPEAT_INTERVAL));
+			}
+			else {
+                cvLeft.wait_for(lk, std::chrono::milliseconds(REPEAT_START_DELAY));
+			}
+		}
+		else
+		{
+			cvLeft.wait(lk);
+		}
+	}
 }
 
 
@@ -59,16 +62,19 @@ void sendRightThreadFunc()
     {
         if (sendRight)
         {
-            if (firstPress2) {
+            if (firstPressRight) {
                 keybd_event(VK_RIGHT, 0, 0, 0);
                 keybd_event(VK_RIGHT, 0, KEYEVENTF_KEYUP, 0);
-                firstPress2 = false;
-                Sleep(100);
+                firstPressRight = false;
+                buttonPressTimeRight = std::chrono::steady_clock::now();
             }
-            else if (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - buttonPressTime2).count() >= 100) {
+            else if (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - buttonPressTimeRight).count() >= REPEAT_START_DELAY) {
                 keybd_event(VK_RIGHT, 0, 0, 0);
                 keybd_event(VK_RIGHT, 0, KEYEVENTF_KEYUP, 0);
-                Sleep(10);
+                cvRight.wait_for(lk, std::chrono::milliseconds(REPEAT_INTERVAL));
+            }
+            else {
+                cvRight.wait_for(lk, std::chrono::milliseconds(REPEAT_START_DELAY));
             }
         }
         else
@@ -91,17 +97,17 @@ LRESULT CALLBACK LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lParam)
         {
             if (xButton == XBUTTON1)
             {
-                buttonPressTime1 = std::chrono::steady_clock::now();
+                buttonPressTimeRight = std::chrono::steady_clock::now();
                 sendRight = true;
-                firstPress1 = true;
+                firstPressRight = true;
                 cvRight.notify_all();
                 return 1;
             }
             else if (xButton == XBUTTON2)
             {
-                buttonPressTime2 = std::chrono::steady_clock::now();
+                buttonPressTimeLeft = std::chrono::steady_clock::now();
                 sendLeft = true;
-                firstPress2 = true;
+                firstPressLeft = true;
                 cvLeft.notify_all();
                 return 1;
             }
@@ -110,12 +116,14 @@ LRESULT CALLBACK LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lParam)
         {
             if (xButton == XBUTTON1)
             {
+                firstPressRight = true; 
                 sendRight = false;
                 return 1;
             }
             else if (xButton == XBUTTON2)
             {
                 sendLeft = false;
+                firstPressLeft = true; 
                 return 1;
             }
         }
@@ -126,7 +134,6 @@ LRESULT CALLBACK LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lParam)
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
-    // Create the keypress threads
     std::thread sendLeftThread(sendLeftThreadFunc);
     std::thread sendRightThread(sendRightThreadFunc);
 
@@ -145,7 +152,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     UnhookWindowsHookEx(mouseHook);
 
-    // When your program is about to exit, join the threads
     sendLeftThread.join();
     sendRightThread.join();
 
