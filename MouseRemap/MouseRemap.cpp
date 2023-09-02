@@ -4,8 +4,8 @@
 #include <atomic>
 #include <mutex>
 
-const int REPEAT_START_DELAY = 200;
-const int REPEAT_INTERVAL = 20;
+int REPEAT_START_DELAY = 200;
+int REPEAT_INTERVAL = 20;
 
 // Flags to control the keypress threads
 std::atomic<bool> sendLeft(false);
@@ -157,6 +157,29 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 	FILE* stream;
 	freopen_s(&stream, "CONOUT$", "w", stdout);
+
+	int argc;
+	LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+	if (argc > 2) {
+		int parsedStartDelay = _wtoi(argv[1]);
+		int parsedInterval = _wtoi(argv[2]);
+
+		if (parsedStartDelay != 0) {
+			REPEAT_START_DELAY = parsedStartDelay;
+		}
+		else {
+			printf("Warning: Could not parse REPEAT_START_DELAY argument. Using default value.\n");
+		}
+
+		if (parsedInterval != 0) {
+			REPEAT_INTERVAL = parsedInterval;
+		}
+		else {
+			printf("Warning: Could not parse REPEAT_INTERVAL argument. Using default value.\n");
+		}
+	}
+	LocalFree(argv);
+
 
 	MSG msg;
 	while (GetMessage(&msg, NULL, 0, 0))
