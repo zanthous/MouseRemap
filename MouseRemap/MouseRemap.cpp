@@ -16,12 +16,6 @@ int REPEAT_INTERVAL = 20;    // Milliseconds between repeats
 std::atomic<bool> sendLeft(false);
 std::atomic<bool> sendRight(false);
 
-// --- State Flags for Shift Simulation ---
-// These track if WE sent a simulated Shift down that needs releasing
-std::atomic<bool> simulatedShiftDownLeft(false);
-std::atomic<bool> simulatedShiftDownRight(false);
-
-
 // --- Condition Variables for Thread Synchronization ---
 std::condition_variable cvRight;
 std::mutex cv_m_Right;
@@ -139,29 +133,11 @@ void sendKeyRelease(UINT key)
     sendInputChecked(ip, "key up");
 }
 
-/**
- * @brief Sends a key event (down or up) for VK_SHIFT.
- * @param press True to send key down, false to send key up.
- */
-void sendShiftEvent(bool press)
-{
-    INPUT ip = {0};
-    ip.type = INPUT_KEYBOARD;
-    ip.ki.wVk = VK_SHIFT; // Generic Shift
-    // Consider using VK_LSHIFT or VK_RSHIFT if generic causes issues
-    // UINT specificShift = (GetAsyncKeyState(VK_LSHIFT) & 0x8000) ? VK_LSHIFT : VK_RSHIFT;
-    // ip.ki.wVk = specificShift;
-    ip.ki.dwFlags = press ? 0 : KEYEVENTF_KEYUP;
-    sendInputChecked(ip, press ? "shift down" : "shift up");
-}
-
-
 // --- Key Repeat Threads ---
 
 void sendLeftThreadFunc()
 {
     bool firstPress = true; // Local state for first press logic within an activation
-    bool shift_was_active_at_start = false; // Track if Shift was held when sequence began
 
     std::unique_lock<std::mutex> lk(cv_m_Left);
     while(true)
@@ -171,17 +147,6 @@ void sendLeftThreadFunc()
 
         // --- Start of activation sequence ---
         firstPress = true;
-        shift_was_active_at_start = (GetAsyncKeyState(VK_LSHIFT) & 0x8000) || (GetAsyncKeyState(VK_RSHIFT) & 0x8000);
-        simulatedShiftDownLeft = false; // Reset our tracking flag
-
-        // Send initial Shift Down IF physical Shift is held
-        if(shift_was_active_at_start)
-        {
-            sendShiftEvent(true); // Send VK_SHIFT DOWN
-            simulatedShiftDownLeft = true; // Mark that we sent it
-            // Optional short delay after sending Shift, before first arrow key
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        }
 
         // Keep sending while sendLeft remains true
         while(sendLeft)
@@ -208,15 +173,6 @@ void sendLeftThreadFunc()
 
         // 1. Release the Arrow Key
         sendKeyRelease(VK_LEFT);
-
-        // 2. Release Shift IF WE simulated its press
-        if(simulatedShiftDownLeft.load())
-        {
-            // Optional delay before releasing Shift
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
-            sendShiftEvent(false); // Send VK_SHIFT UP
-            simulatedShiftDownLeft = false; // Clear our tracking flag
-        }
         // Reset firstPress state variable conceptually (done at start of next activation)
     }
 }
@@ -224,7 +180,6 @@ void sendLeftThreadFunc()
 void sendRightThreadFunc()
 {
     bool firstPress = true; // Local state for first press logic within an activation
-    bool shift_was_active_at_start = false; // Track if Shift was held when sequence began
 
     std::unique_lock<std::mutex> lk(cv_m_Right);
     while(true)
@@ -234,17 +189,6 @@ void sendRightThreadFunc()
 
         // --- Start of activation sequence ---
         firstPress = true;
-        shift_was_active_at_start = (GetAsyncKeyState(VK_LSHIFT) & 0x8000) || (GetAsyncKeyState(VK_RSHIFT) & 0x8000);
-        simulatedShiftDownRight = false; // Reset our tracking flag
-
-        // Send initial Shift Down IF physical Shift is held
-        if(shift_was_active_at_start)
-        {
-            sendShiftEvent(true); // Send VK_SHIFT DOWN
-            simulatedShiftDownRight = true; // Mark that we sent it
-            // Optional short delay
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        }
 
         // Keep sending while sendRight remains true
         while(sendRight)
@@ -271,15 +215,6 @@ void sendRightThreadFunc()
 
         // 1. Release the Arrow Key
         sendKeyRelease(VK_RIGHT);
-
-        // 2. Release Shift IF WE simulated its press
-        if(simulatedShiftDownRight.load())
-        {
-            // Optional delay
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
-            sendShiftEvent(false); // Send VK_SHIFT UP
-            simulatedShiftDownRight = false; // Clear our tracking flag
-        }
     }
 }
 
@@ -365,7 +300,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     AllocConsole();
     FILE* stream;
     freopen_s(&stream, "CONOUT$", "w", stdout);
-    std::cout << "Starting Mouse XButton to Arrow Key Repeater (V3 - Single Shift Logic)..." << std::endl;
+    std::cout << "Starting Mouse XButton to Arrow Key Repeater..." << std::endl;
 
     if(!isProcessElevated())
     {
@@ -423,7 +358,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         return 1; // Exit if hook fails
     }
     std::cout << "Mouse hook installed successfully." << std::endl;
-    std::cout << "Hold Shift + XButton1/XButton2 for Shift+Right/Shift+Left." << std::endl;
+    std::cout << "Hold Shift/Ctrl with XButton1/XButton2 to modify the arrow input." << std::endl;
 
     // --- Message Loop (Keeps the application running) ---
     MSG msg;
