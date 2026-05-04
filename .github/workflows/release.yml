@@ -1,0 +1,67 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to create, for example v1.0.0"
+        required: true
+        type: string
+      prerelease:
+        description: "Mark this release as a prerelease"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+env:
+  CONFIGURATION: Release
+  PLATFORM: x64
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  PRERELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || false }}
+
+jobs:
+  build-release:
+    name: Build and publish release
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build
+        run: msbuild MouseRemap.sln /m /restore /p:Configuration=${{ env.CONFIGURATION }} /p:Platform=${{ env.PLATFORM }}
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $packageDir = "artifacts\MouseRemap-windows-${{ env.PLATFORM }}"
+          New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
+          Copy-Item "x64\Release\MouseRemap.exe" $packageDir
+          if (Test-Path README.md) {
+            Copy-Item README.md $packageDir
+          }
+          Compress-Archive -Path "$packageDir\*" -DestinationPath "artifacts\MouseRemap-windows-${{ env.PLATFORM }}.zip" -Force
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MouseRemap-windows-${{ env.PLATFORM }}
+          path: artifacts/MouseRemap-windows-${{ env.PLATFORM }}.zip
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          target_commitish: ${{ github.sha }}
+          prerelease: ${{ env.PRERELEASE }}
+          files: artifacts/MouseRemap-windows-${{ env.PLATFORM }}.zip
